@@ -1,15 +1,43 @@
-node {
-    def app
-    stage('Clone repository') {
-        git 'https://github.com/CloudComputing-SSWU/history.git'
+pipeline {
+    agent any
+    environment {
+        PROJECT_ID = 'k-mooc-427802'
+        CLUSTER_NAME = 'gke_kmooc'
+        LOCATION = 'asia-northeast3-a'
+        CREDENTIALS_ID = 'c8364045-9f22-407a-9818-39f91d15b726'
     }
-    stage('Build image') {
-        app = docker.build("pjbear/history")
-    }
-    stage('Push image') {
-        docker.withRegistry('https://registry.hub.docker.com', 'dockerhub') {
-           app.push("${env.BUILD_NUMBER}")
-           app.push("latest")
+    stages {
+        stage("Checkout code") {
+            steps {
+                checkout scm
+            }
         }
-    }
+        stage("Build image") {
+            steps {
+                script {
+                    myapp = docker.build("pjbear/history:${env.BUILD_ID}")
+                }
+            }
+        }
+        stage("Push image") {
+            steps {
+                script {
+                    docker.withRegistry('https://registry.hub.docker.com', 'dockerhub') {
+                            myapp.push("latest")
+                            myapp.push("${env.BUILD_ID}")
+                    }
+                }
+            }
+        }        
+        stage('Deploy to GKE') {
+			when {
+				branch 'main'
+			}
+            steps{
+                step([$class: 'KubernetesEngineBuilder', projectId: env.PROJECT_ID, clusterName: env.CLUSTER_NAME, location: env.LOCATION, manifestPattern: 'db.yml', credentialsId: env.CREDENTIALS_ID, verifyDeployments: false])
+                sh "sed -i 's/history:latest/history:${env.BUILD_ID}/g' history.yaml"
+                step([$class: 'KubernetesEngineBuilder', projectId: env.PROJECT_ID, clusterName: env.CLUSTER_NAME, location: env.LOCATION, manifestPattern: 'history.yml', credentialsId: env.CREDENTIALS_ID, verifyDeployments: false])
+            }
+        }
+    }    
 }
